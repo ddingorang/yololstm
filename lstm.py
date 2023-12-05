@@ -41,8 +41,8 @@ def load_file(filepath):
     df = pd.read_csv(filepath, header=0, index_col=False)
     return df
 
-data = load_file('datafulledit.csv') # 학습 데이터
-valid = load_file('data.csv') # 검증 데이터
+data = load_file('data.csv') # 학습 데이터
+valid = load_file('datavalid.csv') # 검증 데이터
 test = load_file('dataedit.csv') # 테스트 데이터
 
 # label : 0=절도, 1=폭행, 2=기물파손
@@ -76,7 +76,7 @@ def segments(df, time_steps, df2):
     #     segments.append([sgm])
     #     sgm = []
 
-    for i in range(0, len(df) - time_steps, int(time_steps)):
+    for i in range(0, len(df) - time_steps, int(0.25*time_steps)):
         for lb in df.loc[:,'SHOULDER_LEFT_X' : 'HEAD_Y']:
             sgm.append(df[lb].values[i:i + time_steps])
 
@@ -92,7 +92,7 @@ def segments(df, time_steps, df2):
 
 # time sequence 설정
 TIME_PERIOD = 24
-epochs = 120
+epochs = 200
 
 # 데이터 전처리
 x_train, y_train = segments(data, TIME_PERIOD, data)
@@ -227,27 +227,29 @@ class onlyLstm(nn.Module) :
         super(onlyLstm, self).__init__()
         self.lstm1 = nn.LSTM(input_size=input_shape, hidden_size=32, num_layers=1, batch_first=True)
         self.dropout1 = nn.Dropout(0.1)
-        self.lstm2 = nn.LSTM(input_size=32, hidden_size=16, num_layers=1, batch_first=True)
-        # self.dropout2 = nn.Dropout(0.1)
-        # self.lstm3 = nn.LSTM(input_size=64, hidden_size=32, num_layers=1, batch_first=True)
-        #self.lstm4 = nn.LSTM(input_size=256, hidden_size=128, num_layers=1, batch_first=True)
+        self.lstm2 = nn.LSTM(input_size=32, hidden_size=64, num_layers=1, batch_first=True)
+        self.dropout2 = nn.Dropout(0.1)
+        self.lstm3 = nn.LSTM(input_size=64, hidden_size=32, num_layers=1, batch_first=True)
+        self.lstm4 = nn.LSTM(input_size=32, hidden_size=16, num_layers=1, batch_first=True)
         # self.lstm5 = nn.LSTM(input_size=256, hidden_size=128, num_layers=1, batch_first=True)
         # self.lstm6 = nn.LSTM(input_size=128, hidden_size=64, num_layers=1, batch_first=True)
         # self.dropout2 = nn.Dropout(0.1)
         # self.lstm7 = nn.LSTM(input_size=64, hidden_size=32, num_layers=1, batch_first=True)
         self.fc = nn.Linear(16, 4)
+        self.relu = nn.ReLU()
 
     def forward(self, x):
         x, _ = self.lstm1(x)
         x = self.dropout1(x)
         x, _ = self.lstm2(x)
-        # x = self.dropout2(x)
-        # x, _ = self.lstm3(x)
-        #x, _ = self.lstm4(x)
+        x = self.dropout2(x)
+        x, _ = self.lstm3(x)
+        x, _ = self.lstm4(x)
         # x, _ = self.lstm5(x)
         # x, _ = self.lstm6(x)
         # x = self.dropout2(x)
         # x, _ = self.lstm7(x)
+        x = self.relu(x)
         x = self.fc(x[:, -1, :])
         return x
 

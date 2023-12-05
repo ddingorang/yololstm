@@ -27,34 +27,34 @@ class onlyLstm(nn.Module) :
         super(onlyLstm, self).__init__()
         self.lstm1 = nn.LSTM(input_size=input_shape, hidden_size=32, num_layers=1, batch_first=True)
         self.dropout1 = nn.Dropout(0.1)
-        self.lstm2 = nn.LSTM(input_size=32, hidden_size=16, num_layers=1, batch_first=True)
-        # self.dropout2 = nn.Dropout(0.1)
-        # self.lstm3 = nn.LSTM(input_size=64, hidden_size=32, num_layers=1, batch_first=True)
-        #self.lstm4 = nn.LSTM(input_size=256, hidden_size=128, num_layers=1, batch_first=True)
+        self.lstm2 = nn.LSTM(input_size=32, hidden_size=64, num_layers=1, batch_first=True)
+        self.dropout2 = nn.Dropout(0.1)
+        self.lstm3 = nn.LSTM(input_size=64, hidden_size=32, num_layers=1, batch_first=True)
+        self.lstm4 = nn.LSTM(input_size=32, hidden_size=16, num_layers=1, batch_first=True)
         # self.lstm5 = nn.LSTM(input_size=256, hidden_size=128, num_layers=1, batch_first=True)
         # self.lstm6 = nn.LSTM(input_size=128, hidden_size=64, num_layers=1, batch_first=True)
         # self.dropout2 = nn.Dropout(0.1)
         # self.lstm7 = nn.LSTM(input_size=64, hidden_size=32, num_layers=1, batch_first=True)
         self.fc = nn.Linear(16, 4)
+        self.relu = nn.ReLU()
 
     def forward(self, x):
         x, _ = self.lstm1(x)
         x = self.dropout1(x)
         x, _ = self.lstm2(x)
-        # x = self.dropout2(x)
-        # x, _ = self.lstm3(x)
-        #x, _ = self.lstm4(x)
+        x = self.dropout2(x)
+        x, _ = self.lstm3(x)
+        x, _ = self.lstm4(x)
         # x, _ = self.lstm5(x)
         # x, _ = self.lstm6(x)
         # x = self.dropout2(x)
         # x, _ = self.lstm7(x)
+        x = self.relu(x)
         x = self.fc(x[:, -1, :])
         return x
 
-time_steps = 16
+time_steps = 20
 N_FEATURES = 26
-first0 = True # 처음 배열에
-first1 = True
 status0 = 'None' # 이상행동 상태 라벨링
 status1 = 'None'
 framecnt = 0
@@ -70,6 +70,11 @@ prevresult1 = 0
 statuslist0 = []
 statuslist1 = []
 
+bagscore = 0
+bagscorelist = []
+assltscore=0
+assltscorelist = []
+
 sc = MinMaxScaler()
 frame_number = 0
 csv_data = []
@@ -82,7 +87,7 @@ yolomodel = YOLO('yolov8n.yaml')  # build a new model from YAML
 yolomodel = YOLO('yolov8n.pt')  # load a pretrained model (recommended for training)
 
 model_path = 'pose_landmarker_full.task' # pretrained된 pose landmarker모델 경로
-video_path = 'testvideo/theft1.mp4' # 추론할 영상 경로
+video_path = 'testvideo/assault1.mp4' # 추론할 영상 경로
 
 # 최근 몇개 status 합산하여 제일 다수인 행동 -> 결정
 
@@ -109,23 +114,10 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 # 영상 모드로 landmarker 객체 생성
 options = PoseLandmarkerOptions(
     base_options=BaseOptions(model_asset_path=model_path), # 모델 경로 위에서 지정함
-    running_mode=VisionRunningMode.VIDEO, num_poses=1,
+    running_mode=VisionRunningMode.VIDEO, num_poses=2,
     min_pose_detection_confidence=0.7,
     min_pose_presence_confidence=0.7, min_tracking_confidence=0.7) # 비디오
 
-
-#검출한 신체 부분 좌표 csv 파일에 저장
-def write_landmarks_to_csv(detection_result, frame_number, csv_data):
-    # print(f"Landmark coordinates for frame {frame_number}:")
-    # for idx, landmark in enumerate(landmarks):
-    #     print(f"{landmarker.PoseLandmark(idx).name}: (x: {landmark.x}, y: {landmark.y}, z: {landmark.z})")
-    #     csv_data.append([frame_number, landmarker.PoseLandmark(idx).name, landmark.x, landmark.y, landmark.z])
-    # print("\n")
-    print(f"Landmark coordinates for frame {frame_number}:")
-    pose_landmarks_list = detection_result.pose_landmarks
-    for idx in range(len(pose_landmarks_list)):
-        pose_landmarks = pose_landmarks_list[idx]
-        csv_data.append([frame_number, landmarker.PoseLandmark(idx).name, landmark.x, landmark.y, landmark.z])
 
 # 감지된 landmark 영상에 출력
 def draw_landmarks_on_image(rgb_image, detection_result):
@@ -211,9 +203,9 @@ def infer(data, status, prevrslt) :
         with torch.no_grad():
             result = model(image.to(device))  # 추론
             currprev = result - prevrslt
-            print("prev : ", prevrslt)
-            print("curr : ", result)
-            print("curr-prev : ", currprev)
+            # print("prev : ", prevrslt)
+            # print("curr : ", result)
+            # print("curr-prev : ", currprev)
             # if(currprev[:,3] < 0 and currprev[:,3] == currprev.min()) :
             #     #out_index = currprev[:,0:3].argmax()
             #     out_index = currprev[:,0:3].argmax()
@@ -222,11 +214,11 @@ def infer(data, status, prevrslt) :
             _, out_index = torch.max(result, 1)
 
             if out_index.item() == 0:
-                status = 'theft'  # 절도
+                status = 'abnml'  # 절도
             elif out_index.item() == 1:
-                status = 'assault'  # 폭행
+                status = 'abnml'  # 폭행
             elif out_index.item() == 2:
-                status = 'damage'  # 기물파손
+                status = 'abnml'  # 기물파손
             elif out_index.item() == 3:
                 status = 'walk' # 매장 내 이동
     # 한 timestep 분량의 추론이 끝났으면 초기화, 다음 timestep 분량의 좌표를 다시 저장하여 추론 반복
@@ -250,6 +242,8 @@ def predict(mode):
     global framecnt
     global prevresult0
     global prevresult1
+    global bagscore, bagscorelist
+    global assltscore, assltscorelist
     with PoseLandmarker.create_from_options(options) as landmarker:
         # The landmarker is initialized. Use it here.
         # landmarker 객체 생성됨, 여기서부터 사용
@@ -291,6 +285,10 @@ def predict(mode):
                     csvdata0, status0, result0 = inference(csvdata0, status0, prevresult0)
                     prevresult0 = result0
                     statuslist0.append(status0)
+                    bagscorelist.append(bagscore)
+                    bagscore = 0
+                    assltscorelist.append(assltscore)
+                    assltscore = 0
                     # print(prevresult0)
 
                 if len(csvdata1) == time_steps * N_FEATURES:
@@ -298,11 +296,18 @@ def predict(mode):
                     prevresult1 = result1
                     statuslist1.append(status1)
 
-                if len(statuslist0) == 10 :
-                    if statuslist0.count('walk') < 5 :
+                if len(statuslist0) == 15 :
+                    print(assltscorelist)
+                    if statuslist0.count('walk') < 10 :
+
+                        if max(assltscorelist) > 3 :
+                            print(assltscorelist)
+                            assltlvl = 1
+                        else :
+                            assltlvl = 0
                         try :
                             url = "http://localhost:8080/detect"
-                            data = {"message": "abnormal behavior detected"}
+                            data = {"id" : 0, "message": "abnormal behavior detected", "time": framecnt, "assltlvl": assltlvl}
                             response = requests.get(url, json=data)
                             if response.status_code == 200:
                                 print('Notification sent successfully', 200)
@@ -311,13 +316,35 @@ def predict(mode):
                         except requests.exceptions.ConnectionError as errc:
                             print("Error Connecting:", errc)
 
+                        cv2.putText(annotated_image, "alert sent", (1500, 100), cv2.FONT_HERSHEY_COMPLEX, 1.5,
+                                    (0, 0, 255), 2)
+
+                    del statuslist0[:3]
+                    del bagscorelist[:3]
+                    del assltscorelist[:3]
 
                     #print(mode(statuslist0))
-                    statuslist0.clear()
+                    # statuslist0.clear()
 
-                if len(statuslist1) == 10 :
+                if len(statuslist1) == 15 :
+                    if statuslist1.count('walk') < 10 :
+
+                        try :
+                            url = "http://localhost:8080/detect"
+                            data = {"id" : 1, "message": "abnormal behavior detected", "time" : framecnt}
+                            response = requests.get(url, json=data)
+                            if response.status_code == 200:
+                                print('Notification sent successfully', 200)
+                            else:
+                                print('Failed to send notification', 400)
+                        except requests.exceptions.ConnectionError as errc:
+                            print("Error Connecting:", errc)
+
+                        cv2.putText(annotated_image, "alert sent", (900, 100), cv2.FONT_HERSHEY_COMPLEX, 1.5,
+                                    (0, 0, 255), 2)
+                    del statuslist1[:3]
                     #print(mode(statuslist1))
-                    statuslist1.clear()
+                    # statuslist1.clear()
 
                 # 추론 결과(이상행동 판단)에 대해 표시
                 w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -327,18 +354,27 @@ def predict(mode):
                 cv2.putText(annotated_image, "1 : {}".format(status1), (300, 100), cv2.FONT_HERSHEY_COMPLEX, 1.5,
                             (0, 0, 255), 2)
 
+
                 # yolo로 감지한 객체에 대해서 표시(직사각형 바운딩 박스로)
                 for result in yoloresults:
-                    # print("result : ", result.boxes.cpu().numpy())
+                    #print("result : ", result.boxes.cpu().numpy())
+                    if len(result.boxes.cpu().numpy()) == 2:
+                        lim = result.boxes.cpu().numpy().xywh[0, 2] / 2 + result.boxes.cpu().numpy().xywh[1, 2] / 2
+                        print(lim)
+                        print(abs(result.boxes.cpu().numpy().xywh[0, 0] - result.boxes.cpu().numpy().xywh[1, 0]))
+                        if abs(result.boxes.cpu().numpy().xywh[0, 0] - result.boxes.cpu().numpy().xywh[1, 0]) - abs(lim) < 100 :
+                            assltscore += 1
+                            print(assltscore)
                     for box in result.boxes.cpu().numpy():
                         # Add the landmark coordinates to the list and print them
-                        # print("box : " ,box)
+                        #print("box : " ,box)
                         r = box.xyxy[0].astype(int)
                         cv2.rectangle(annotated_image, r[:2], r[2:], (0, 0, 255), 2)
                         if box.is_track == True:
                             id = box.id[0]
                             cls = box.cls[0]
                             conf = box.conf[0]
+                            if cls == 24 or 26 : bagscore += 1
                             cv2.putText(annotated_image, "id : {}".format(int(id)), (r[0], r[1] - 10),
                                         cv2.FONT_HERSHEY_COMPLEX,
                                         1.5, (0, 0, 255), 2)
@@ -380,7 +416,7 @@ def predict(mode):
             # out.release()
             # out_imglist = []
 
-            if len(out_imglist) == 120:
+            if len(out_imglist) == 170:
                 out_imglist = np.asarray(out_imglist)
                 # 추론 결과를 영상(mp4)으로 저장
                 out = cv2.VideoWriter('./out.mp4', cv2.VideoWriter_fourcc(*'DIVX'), 3, (1920, 1080), True)

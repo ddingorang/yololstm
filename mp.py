@@ -53,7 +53,7 @@ class onlyLstm(nn.Module) :
         x = self.fc(x[:, -1, :])
         return x
 
-time_steps = 20
+time_steps = 16
 N_FEATURES = 26
 status0 = 'None' # 이상행동 상태 라벨링
 status1 = 'None'
@@ -87,7 +87,7 @@ yolomodel = YOLO('yolov8n.yaml')  # build a new model from YAML
 yolomodel = YOLO('yolov8n.pt')  # load a pretrained model (recommended for training)
 
 model_path = 'pose_landmarker_full.task' # pretrained된 pose landmarker모델 경로
-video_path = 'testvideo/assault1.mp4' # 추론할 영상 경로
+video_path = 'testvideo/damage2.mp4' # 추론할 영상 경로
 
 # 최근 몇개 status 합산하여 제일 다수인 행동 -> 결정
 
@@ -204,7 +204,7 @@ def infer(data, status, prevrslt) :
             result = model(image.to(device))  # 추론
             currprev = result - prevrslt
             # print("prev : ", prevrslt)
-            # print("curr : ", result)
+            print("curr : ", result)
             # print("curr-prev : ", currprev)
             # if(currprev[:,3] < 0 and currprev[:,3] == currprev.min()) :
             #     #out_index = currprev[:,0:3].argmax()
@@ -297,9 +297,14 @@ def predict(mode):
                     statuslist1.append(status1)
 
                 if len(statuslist0) == 15 :
-                    print(assltscorelist)
-                    if statuslist0.count('walk') < 10 :
-
+                    # print("asslt : ", assltscorelist)
+                    # print("bag : ", bagscorelist)
+                    if statuslist0.count('walk') < 12 :
+                        if max(bagscorelist) != 0 :
+                            baglvl = 1
+                            print(bagscorelist)
+                        else :
+                            baglvl = 0
                         if max(assltscorelist) > 3 :
                             print(assltscorelist)
                             assltlvl = 1
@@ -307,7 +312,7 @@ def predict(mode):
                             assltlvl = 0
                         try :
                             url = "http://localhost:8080/detect"
-                            data = {"id" : 0, "message": "abnormal behavior detected", "time": framecnt, "assltlvl": assltlvl}
+                            data = {"id" : 0, "message": "abnormal behavior detected", "time": framecnt, "assltlvl": assltlvl, "baglvl" : baglvl}
                             response = requests.get(url, json=data)
                             if response.status_code == 200:
                                 print('Notification sent successfully', 200)
@@ -374,7 +379,10 @@ def predict(mode):
                             id = box.id[0]
                             cls = box.cls[0]
                             conf = box.conf[0]
-                            if cls == 24 or 26 : bagscore += 1
+
+                            if int(cls) == 24 or int(cls) == 26 :
+                                bagscore += 1
+                                print(bagscore)
                             cv2.putText(annotated_image, "id : {}".format(int(id)), (r[0], r[1] - 10),
                                         cv2.FONT_HERSHEY_COMPLEX,
                                         1.5, (0, 0, 255), 2)

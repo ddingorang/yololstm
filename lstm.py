@@ -41,8 +41,8 @@ def load_file(filepath):
     df = pd.read_csv(filepath, header=0, index_col=False)
     return df
 
-data = load_file('data.csv') # 학습 데이터
-valid = load_file('datavalid.csv') # 검증 데이터
+data = load_file('datafulledit.csv') # 학습 데이터
+valid = load_file('data.csv') # 검증 데이터
 test = load_file('dataedit.csv') # 테스트 데이터
 
 # label : 0=절도, 1=폭행, 2=기물파손
@@ -76,7 +76,7 @@ def segments(df, time_steps, df2):
     #     segments.append([sgm])
     #     sgm = []
 
-    for i in range(0, len(df) - time_steps, int(0.25*time_steps)):
+    for i in range(0, len(df) - time_steps, int(time_steps)):
         for lb in df.loc[:,'SHOULDER_LEFT_X' : 'HEAD_Y']:
             sgm.append(df[lb].values[i:i + time_steps])
 
@@ -91,7 +91,7 @@ def segments(df, time_steps, df2):
     return reshaped_segments, labels
 
 # time sequence 설정
-TIME_PERIOD = 24
+TIME_PERIOD = 16
 epochs = 200
 
 # 데이터 전처리

@@ -58,7 +58,7 @@ N_FEATURES = 26
 status0 = 'None' # 이상행동 상태 라벨링
 status1 = 'None'
 framecnt = 0
-livestrm = False
+livestrm = True
 
 # 신체 좌표 저장하는 배열
 csvdata0 = np.array([]) # 첫번째 사람
@@ -115,8 +115,8 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 options = PoseLandmarkerOptions(
     base_options=BaseOptions(model_asset_path=model_path), # 모델 경로 위에서 지정함
     running_mode=VisionRunningMode.VIDEO, num_poses=2,
-    min_pose_detection_confidence=0.7,
-    min_pose_presence_confidence=0.7, min_tracking_confidence=0.7) # 비디오
+    min_pose_detection_confidence=0.5,
+    min_pose_presence_confidence=0.5, min_tracking_confidence=0.5) # 비디오
 
 
 # 감지된 landmark 영상에 출력
@@ -250,8 +250,8 @@ def predict(mode):
         # Use OpenCV’s VideoCapture to load the input video.
         if livestrm == True:
             cap = cv2.VideoCapture(0)  # 영상 불러오고
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            #cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+            #cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
         else:
             cap = cv2.VideoCapture(video_path)
 
@@ -296,10 +296,10 @@ def predict(mode):
                     prevresult1 = result1
                     statuslist1.append(status1)
 
-                if len(statuslist0) == 15 :
+                if len(statuslist0) == 16 :
                     # print("asslt : ", assltscorelist)
                     # print("bag : ", bagscorelist)
-                    if statuslist0.count('walk') < 12 :
+                    if statuslist0.count('walk') < 10 :
                         if max(bagscorelist) != 0 :
                             baglvl = 1
                             print(bagscorelist)
@@ -311,9 +311,9 @@ def predict(mode):
                         else :
                             assltlvl = 0
                         try :
-                            url = "http://localhost:8080/detect"
-                            data = {"id" : 0, "message": "abnormal behavior detected", "time": framecnt, "assltlvl": assltlvl, "baglvl" : baglvl}
-                            response = requests.get(url, json=data)
+                            url = "http://localhost:8080/abnormal"
+                            data = {"id" : 0, "label" : 1, "message": "abnormal behavior detected", "time": framecnt, "assltlvl": assltlvl, "baglvl" : baglvl}
+                            response = requests.post(url, json=data)
                             if response.status_code == 200:
                                 print('Notification sent successfully', 200)
                             else:
@@ -324,19 +324,19 @@ def predict(mode):
                         cv2.putText(annotated_image, "alert sent", (1500, 100), cv2.FONT_HERSHEY_COMPLEX, 1.5,
                                     (0, 0, 255), 2)
 
-                    del statuslist0[:3]
-                    del bagscorelist[:3]
-                    del assltscorelist[:3]
+                    del statuslist0[:4]
+                    del bagscorelist[:4]
+                    del assltscorelist[:4]
 
                     #print(mode(statuslist0))
                     # statuslist0.clear()
 
-                if len(statuslist1) == 15 :
+                if len(statuslist1) == 16 :
                     if statuslist1.count('walk') < 10 :
 
                         try :
                             url = "http://localhost:8080/detect"
-                            data = {"id" : 1, "message": "abnormal behavior detected", "time" : framecnt}
+                            data = {"id" : 1, "label" : 1, "message": "abnormal behavior detected", "time" : framecnt}
                             response = requests.get(url, json=data)
                             if response.status_code == 200:
                                 print('Notification sent successfully', 200)
@@ -347,7 +347,7 @@ def predict(mode):
 
                         cv2.putText(annotated_image, "alert sent", (900, 100), cv2.FONT_HERSHEY_COMPLEX, 1.5,
                                     (0, 0, 255), 2)
-                    del statuslist1[:3]
+                    del statuslist1[:4]
                     #print(mode(statuslist1))
                     # statuslist1.clear()
 
@@ -394,15 +394,15 @@ def predict(mode):
                 # write_landmarks_to_csv(result, frame_number, csv_data)
 
                 out_imglist.append(annotated_image)
-                cv2.imwrite("frame/imagedetected%d.jpg" % framecnt, annotated_image)  # 추론 결과를 이미지 저장
+                #cv2.imwrite("frame/imagedetected%d.jpg" % framecnt, annotated_image)  # 추론 결과를 이미지 저장
                 framecnt = framecnt + 1
                 cv2.imshow('MediaPipe Pose', annotated_image)
                 cv2.waitKey(1)
 
-                if mode == 'web' :
-                    ret, frame = cv2.imencode(".jpg", annotated_image)
-                    frame = frame.tobytes()
-                    yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                # if mode == 'web' :
+                #     ret, frame = cv2.imencode(".jpg", annotated_image)
+                #     frame = frame.tobytes()
+                #     yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 
             else:
@@ -410,10 +410,10 @@ def predict(mode):
                 cv2.putText(frame, "1 : {}".format(status1), (300, 100), cv2.FONT_HERSHEY_COMPLEX, 1.5, (0, 0, 255), 2)
                 out_imglist.append(frame)
 
-                if mode == 'web' :
-                    ret, frame = cv2.imencode(".jpg", frame)
-                    frame = frame.tobytes()
-                    yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                # if mode == 'web' :
+                #     ret, frame = cv2.imencode(".jpg", frame)
+                #     frame = frame.tobytes()
+                #     yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 
             # out_imglist = np.asarray(out_imglist)
@@ -424,7 +424,7 @@ def predict(mode):
             # out.release()
             # out_imglist = []
 
-            if len(out_imglist) == 170:
+            if len(out_imglist) == 180:
                 out_imglist = np.asarray(out_imglist)
                 # 추론 결과를 영상(mp4)으로 저장
                 out = cv2.VideoWriter('./out.mp4', cv2.VideoWriter_fourcc(*'DIVX'), 3, (1920, 1080), True)
@@ -443,6 +443,7 @@ def predict(mode):
                         print('Failed to send notification', 400)
                 except requests.exceptions.ConnectionError as errc:
                     print("Error Connecting:", errc)
+                framecnt = 0
 
 
 ################################################
@@ -478,7 +479,7 @@ def index() :
     return f'''
     <html>
     <body>
-        <img src="/video_feed" style='width:50%; height:auto;' />
+        <img src="/video_feed" style='width:80%; height:auto;' />
     </body>
     </html>
     '''

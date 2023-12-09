@@ -1,6 +1,9 @@
 from __future__ import with_statement
 from contextlib import closing
 
+import websocket
+import time
+import boto3
 import cv2
 import mediapipe as mp
 from ultralytics import YOLO
@@ -20,6 +23,43 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import MinMaxScaler
 from statistics import mode
 from mediapipe.tasks.python import vision
+
+try:
+    import thread
+except ImportError:
+    import _thread as thread
+
+def on_message(ws, message):
+    print(message)
+def on_error(ws, error):
+    print(error)
+def on_close(ws, close_status_code, close_msg):
+    print("### closed ###")
+def on_open(ws):
+    def run(*args):
+        # Send the abnormal behavior message to the websocket server
+        ws.send('abnormal behavior')
+        time.sleep(1)
+        ws.close()
+    thread.start_new_thread(run, ())
+
+if __name__ == "__main__":
+    websocket.enableTrace(True)
+    ws = websocket.WebSocketApp("ws://localhost:8081/",
+                              on_open = on_open,
+                              on_message = on_message,
+                              on_error = on_error,
+                              on_close = on_close)
+    ws.run_forever()
+
+# Retrieve the list of existing buckets
+# s3 = boto3.client('s3')
+# response = s3.list_buckets()
+#
+# # Output the bucket names
+# print('Existing buckets:')
+# for bucket in response['Buckets']:
+#     print(f'  {bucket["Name"]}')
 
 # 앞에서 훈련시킨 모델 정보 다시 작성해야...모델 로드가 가능
 class onlyLstm(nn.Module) :
@@ -58,7 +98,7 @@ N_FEATURES = 26
 status0 = 'None' # 이상행동 상태 라벨링
 status1 = 'None'
 framecnt = 0
-livestrm = True
+livestrm = False
 
 # 신체 좌표 저장하는 배열
 csvdata0 = np.array([]) # 첫번째 사람
@@ -87,7 +127,7 @@ yolomodel = YOLO('yolov8n.yaml')  # build a new model from YAML
 yolomodel = YOLO('yolov8n.pt')  # load a pretrained model (recommended for training)
 
 model_path = 'pose_landmarker_full.task' # pretrained된 pose landmarker모델 경로
-video_path = 'testvideo/damage2.mp4' # 추론할 영상 경로
+video_path = 'testvideo/theft3.mp4' # 추론할 영상 경로
 
 # 최근 몇개 status 합산하여 제일 다수인 행동 -> 결정
 
@@ -229,7 +269,7 @@ def infer(data, status, prevrslt) :
 def inference(csvdata, status, prevrslt) :
     csvdata = sc.fit_transform(np.asarray(csvdata, dtype=np.float32).reshape(-1, 26))
     csvdata, status, result = infer(csvdata, status, prevrslt)
-    print(frame_number)
+    print(framecnt)
     return csvdata, status, result
 
 def predict(mode):
@@ -250,15 +290,15 @@ def predict(mode):
         # Use OpenCV’s VideoCapture to load the input video.
         if livestrm == True:
             cap = cv2.VideoCapture(0)  # 영상 불러오고
-            #cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-            #cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
         else:
             cap = cv2.VideoCapture(video_path)
 
         while cap.isOpened():
             ret, frame = cap.read()
-            # if livestrm == True:
-            #     cv2.waitKey(333)
+            if livestrm == True:
+                cv2.waitKey(333)
             if not ret:
                 break
 
@@ -299,7 +339,7 @@ def predict(mode):
                 if len(statuslist0) == 16 :
                     # print("asslt : ", assltscorelist)
                     # print("bag : ", bagscorelist)
-                    if statuslist0.count('walk') < 10 :
+                    if statuslist0.count('walk') < 12 :
                         if max(bagscorelist) != 0 :
                             baglvl = 1
                             print(bagscorelist)
@@ -311,9 +351,17 @@ def predict(mode):
                         else :
                             assltlvl = 0
                         try :
-                            url = "http://localhost:8080/abnormal"
+                            url = "http://localhost:8080"
                             data = {"id" : 0, "label" : 1, "message": "abnormal behavior detected", "time": framecnt, "assltlvl": assltlvl, "baglvl" : baglvl}
                             response = requests.post(url, json=data)
+                            # if __name__ == "__main__":
+                            #     websocket.enableTrace(True)
+                            #     ws = websocket.WebSocketApp("ws://localhost:8081/",
+                            #                                 on_open=on_open,
+                            #                                 on_message=on_message,
+                            #                                 on_error=on_error,
+                            #                                 on_close=on_close)
+                            #     ws.run_forever()
                             if response.status_code == 200:
                                 print('Notification sent successfully', 200)
                             else:
@@ -332,10 +380,10 @@ def predict(mode):
                     # statuslist0.clear()
 
                 if len(statuslist1) == 16 :
-                    if statuslist1.count('walk') < 10 :
+                    if statuslist1.count('walk') < 12 :
 
                         try :
-                            url = "http://localhost:8080/detect"
+                            url = "http://localhost:8080/"
                             data = {"id" : 1, "label" : 1, "message": "abnormal behavior detected", "time" : framecnt}
                             response = requests.get(url, json=data)
                             if response.status_code == 200:
@@ -365,8 +413,8 @@ def predict(mode):
                     #print("result : ", result.boxes.cpu().numpy())
                     if len(result.boxes.cpu().numpy()) == 2:
                         lim = result.boxes.cpu().numpy().xywh[0, 2] / 2 + result.boxes.cpu().numpy().xywh[1, 2] / 2
-                        print(lim)
-                        print(abs(result.boxes.cpu().numpy().xywh[0, 0] - result.boxes.cpu().numpy().xywh[1, 0]))
+                        #print(lim)
+                        #print(abs(result.boxes.cpu().numpy().xywh[0, 0] - result.boxes.cpu().numpy().xywh[1, 0]))
                         if abs(result.boxes.cpu().numpy().xywh[0, 0] - result.boxes.cpu().numpy().xywh[1, 0]) - abs(lim) < 100 :
                             assltscore += 1
                             print(assltscore)
@@ -396,24 +444,27 @@ def predict(mode):
                 out_imglist.append(annotated_image)
                 #cv2.imwrite("frame/imagedetected%d.jpg" % framecnt, annotated_image)  # 추론 결과를 이미지 저장
                 framecnt = framecnt + 1
-                cv2.imshow('MediaPipe Pose', annotated_image)
-                cv2.waitKey(1)
+                #cv2.imshow('MediaPipe Pose', annotated_image)
+                #cv2.waitKey(1)
 
-                # if mode == 'web' :
-                #     ret, frame = cv2.imencode(".jpg", annotated_image)
-                #     frame = frame.tobytes()
-                #     yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                if mode == 'web' :
+                    ret, frame = cv2.imencode(".jpg", annotated_image)
+                    frame = frame.tobytes()
+                    yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 
             else:
                 cv2.putText(frame, "0 : {}".format(status0), (0, 100), cv2.FONT_HERSHEY_COMPLEX, 1.5, (0, 0, 255), 2)
                 cv2.putText(frame, "1 : {}".format(status1), (300, 100), cv2.FONT_HERSHEY_COMPLEX, 1.5, (0, 0, 255), 2)
                 out_imglist.append(frame)
+                framecnt = framecnt + 1
+                #cv2.imshow('MediaPipe Pose', frame)
+                #cv2.waitKey(1)
 
-                # if mode == 'web' :
-                #     ret, frame = cv2.imencode(".jpg", frame)
-                #     frame = frame.tobytes()
-                #     yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                if mode == 'web' :
+                    ret, frame = cv2.imencode(".jpg", frame)
+                    frame = frame.tobytes()
+                    yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 
             # out_imglist = np.asarray(out_imglist)
@@ -432,17 +483,24 @@ def predict(mode):
                     out.write(outimg)
                 out.release()
                 out_imglist = []
-                try :
-                    url = "http://localhost:8080/detect"
-                    data = "out.mp4"
-                    response1 = requests.get(url, data=data)
-                    print(response1.status_code)
-                    if response1.status_code == 200:
-                        print('video sent successfully', 200)
-                    else:
-                        print('Failed to send notification', 400)
-                except requests.exceptions.ConnectionError as errc:
-                    print("Error Connecting:", errc)
+
+                # s3.upload_file(
+                #     'out.mp4',
+                #     'daeng-s3-bucket',
+                #     'outvid.mp4',
+                # )
+
+                # try :
+                #     url = "http://localhost:8080/detect"
+                #     data = "out.mp4"
+                #     response1 = requests.get(url, data=data)
+                #     print(response1.status_code)
+                #     if response1.status_code == 200:
+                #         print('video sent successfully', 200)
+                #     else:
+                #         print('Failed to send notification', 400)
+                # except requests.exceptions.ConnectionError as errc:
+                #     print("Error Connecting:", errc)
                 framecnt = 0
 
 
@@ -475,7 +533,7 @@ def init_db():
         db.commit()
 @app.route('/')
 def index() :
-    predict('web')
+    #predict('web')
     return f'''
     <html>
     <body>

@@ -1,7 +1,7 @@
 from __future__ import with_statement
 from contextlib import closing
 
-import websocket
+
 import time
 import boto3
 import cv2
@@ -24,37 +24,22 @@ from sklearn.preprocessing import MinMaxScaler
 from statistics import mode
 from mediapipe.tasks.python import vision
 
-try:
-    import thread
-except ImportError:
-    import _thread as thread
-
-def on_message(ws, message):
-    print(message)
-def on_error(ws, error):
-    print(error)
-def on_close(ws, close_status_code, close_msg):
-    print("### closed ###")
-def on_open(ws):
-    def run(*args):
-        # Send the abnormal behavior message to the websocket server
-        ws.send('abnormal behavior')
-        time.sleep(1)
-        ws.close()
-    thread.start_new_thread(run, ())
-
-if __name__ == "__main__":
-    websocket.enableTrace(True)
-    ws = websocket.WebSocketApp("ws://localhost:8081/",
-                              on_open = on_open,
-                              on_message = on_message,
-                              on_error = on_error,
-                              on_close = on_close)
-    ws.run_forever()
-
 # Retrieve the list of existing buckets
-# s3 = boto3.client('s3')
-# response = s3.list_buckets()
+s3 = boto3.client('s3')
+
+bucket_name = 'daeng-target-bucket'
+directory_path = ''
+video_file_path = 'out.mp4'
+def upload_video_to_s3(bucket_name, directory_path, video_file_path):
+    s3 = boto3.client('s3')
+    key = f'{directory_path}/{video_file_path}'  # 업로드할 파일의 경로
+
+    try:
+        s3.upload_file(video_file_path, bucket_name, key)
+        print(f'{video_file_path} 파일을 S3 버킷 {bucket_name}의 {directory_path} 경로에 성공적으로 업로드했습니다.')
+    except Exception as e:
+        print(f'업로드 실패: {e}')
+#response = s3.list_buckets()
 #
 # # Output the bucket names
 # print('Existing buckets:')
@@ -99,6 +84,9 @@ status0 = 'None' # 이상행동 상태 라벨링
 status1 = 'None'
 framecnt = 0
 livestrm = False
+record = False
+recordfirst = True
+abnmlframenum = 0
 
 # 신체 좌표 저장하는 배열
 csvdata0 = np.array([]) # 첫번째 사람
@@ -127,7 +115,7 @@ yolomodel = YOLO('yolov8n.yaml')  # build a new model from YAML
 yolomodel = YOLO('yolov8n.pt')  # load a pretrained model (recommended for training)
 
 model_path = 'pose_landmarker_full.task' # pretrained된 pose landmarker모델 경로
-video_path = 'testvideo/theft3.mp4' # 추론할 영상 경로
+video_path = 'testvideo/damage1.mp4' # 추론할 영상 경로
 
 # 최근 몇개 status 합산하여 제일 다수인 행동 -> 결정
 
@@ -139,7 +127,7 @@ video_path = 'testvideo/theft3.mp4' # 추론할 영상 경로
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 cuda = True if torch.cuda.is_available() else False
 model = onlyLstm(N_FEATURES).cuda()
-model.load_state_dict(torch.load("model.pt", map_location=device))
+model.load_state_dict(torch.load("modela.pt", map_location=device))
 #model = torch.load("model.pt", map_location=device) # lstm.py에서 학습했던 모델 불러오기
 model.eval() # 평가 모드!!! 중요
 
@@ -154,9 +142,9 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 # 영상 모드로 landmarker 객체 생성
 options = PoseLandmarkerOptions(
     base_options=BaseOptions(model_asset_path=model_path), # 모델 경로 위에서 지정함
-    running_mode=VisionRunningMode.VIDEO, num_poses=2,
-    min_pose_detection_confidence=0.5,
-    min_pose_presence_confidence=0.5, min_tracking_confidence=0.5) # 비디오
+    running_mode=VisionRunningMode.VIDEO, num_poses=1,
+    min_pose_detection_confidence=0.6,
+    min_pose_presence_confidence=0.6, min_tracking_confidence=0.6) # 비디오
 
 
 # 감지된 landmark 영상에 출력
@@ -274,24 +262,22 @@ def inference(csvdata, status, prevrslt) :
 
 def predict(mode):
     global frame_number, statuslist0, statuslist1
-    global csvdata0
-    global csvdata1
-    global status0
-    global status1
+    global csvdata0, csvdata1
+    global status0, status1
     global out_imglist
     global framecnt
-    global prevresult0
-    global prevresult1
+    global prevresult0, prevresult1
     global bagscore, bagscorelist
     global assltscore, assltscorelist
+    global abnmlframenum, record, recordfirst
     with PoseLandmarker.create_from_options(options) as landmarker:
         # The landmarker is initialized. Use it here.
         # landmarker 객체 생성됨, 여기서부터 사용
         # Use OpenCV’s VideoCapture to load the input video.
         if livestrm == True:
             cap = cv2.VideoCapture(0)  # 영상 불러오고
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         else:
             cap = cv2.VideoCapture(video_path)
 
@@ -339,7 +325,7 @@ def predict(mode):
                 if len(statuslist0) == 16 :
                     # print("asslt : ", assltscorelist)
                     # print("bag : ", bagscorelist)
-                    if statuslist0.count('walk') < 12 :
+                    if statuslist0.count('walk') < 11 :
                         if max(bagscorelist) != 0 :
                             baglvl = 1
                             print(bagscorelist)
@@ -350,18 +336,19 @@ def predict(mode):
                             assltlvl = 1
                         else :
                             assltlvl = 0
+
+                        record = True
+                        if recordfirst == True :
+                            abnmlframenum = framecnt
+                            recordfirst = False
+                        elif framecnt - abnmlframenum < 15 : pass
+                        else : abnmlframenum = framecnt
+
                         try :
-                            url = "http://localhost:8080"
+                            url = "http://localhost:8080/notifications"
                             data = {"id" : 0, "label" : 1, "message": "abnormal behavior detected", "time": framecnt, "assltlvl": assltlvl, "baglvl" : baglvl}
                             response = requests.post(url, json=data)
-                            # if __name__ == "__main__":
-                            #     websocket.enableTrace(True)
-                            #     ws = websocket.WebSocketApp("ws://localhost:8081/",
-                            #                                 on_open=on_open,
-                            #                                 on_message=on_message,
-                            #                                 on_error=on_error,
-                            #                                 on_close=on_close)
-                            #     ws.run_forever()
+
                             if response.status_code == 200:
                                 print('Notification sent successfully', 200)
                             else:
@@ -380,11 +367,11 @@ def predict(mode):
                     # statuslist0.clear()
 
                 if len(statuslist1) == 16 :
-                    if statuslist1.count('walk') < 12 :
+                    if statuslist1.count('walk') < 11 :
 
                         try :
-                            url = "http://localhost:8080/"
-                            data = {"id" : 1, "label" : 1, "message": "abnormal behavior detected", "time" : framecnt}
+                            url = "http://localhost:8080/notifications"
+                            data = {"id" : 1, "label" : 1, "message": "abnormal behavior detected", "time" : framecnt, "assltlvl" : 0, "baglvl" : 0}
                             response = requests.get(url, json=data)
                             if response.status_code == 200:
                                 print('Notification sent successfully', 200)
@@ -415,9 +402,11 @@ def predict(mode):
                         lim = result.boxes.cpu().numpy().xywh[0, 2] / 2 + result.boxes.cpu().numpy().xywh[1, 2] / 2
                         #print(lim)
                         #print(abs(result.boxes.cpu().numpy().xywh[0, 0] - result.boxes.cpu().numpy().xywh[1, 0]))
-                        if abs(result.boxes.cpu().numpy().xywh[0, 0] - result.boxes.cpu().numpy().xywh[1, 0]) - abs(lim) < 100 :
-                            assltscore += 1
-                            print(assltscore)
+                        #print(result.boxes.cpu().numpy())
+                        if max(result.boxes.cpu().numpy().cls) == 0:
+                            if abs(result.boxes.cpu().numpy().xywh[0, 0] - result.boxes.cpu().numpy().xywh[1, 0]) - abs(lim) < 150 :
+                                assltscore += 1
+                                print(assltscore)
                     for box in result.boxes.cpu().numpy():
                         # Add the landmark coordinates to the list and print them
                         #print("box : " ,box)
@@ -475,20 +464,34 @@ def predict(mode):
             # out.release()
             # out_imglist = []
 
-            if len(out_imglist) == 180:
+            if record == True and abnmlframenum == framecnt - 15:
+                i = 0
                 out_imglist = np.asarray(out_imglist)
                 # 추론 결과를 영상(mp4)으로 저장
-                out = cv2.VideoWriter('./out.mp4', cv2.VideoWriter_fourcc(*'DIVX'), 3, (1920, 1080), True)
+                if livestrm == False :
+                    out = cv2.VideoWriter('./out.mp4', cv2.VideoWriter_fourcc(*'DIVX'), 3, (1920, 1080), True)
+                else :
+                    out = cv2.VideoWriter('./out.mp4', cv2.VideoWriter_fourcc(*'DIVX'), 3, (1280, 720), True)
                 for outimg in out_imglist:
-                    out.write(outimg)
+                    if i < len(out_imglist) - 30 : pass
+                    else : out.write(outimg)
+                    i += 1
                 out.release()
                 out_imglist = []
+                record = False
 
-                # s3.upload_file(
-                #     'out.mp4',
-                #     'daeng-s3-bucket',
-                #     'outvid.mp4',
-                # )
+                upload_video_to_s3(bucket_name, directory_path, video_file_path)
+
+            # if len(out_imglist) == 170:
+            #     out_imglist = np.asarray(out_imglist)
+            #     # 추론 결과를 영상(mp4)으로 저장
+            #     out = cv2.VideoWriter('./out.mp4', cv2.VideoWriter_fourcc(*'DIVX'), 3, (1920, 1080), True)
+            #     for outimg in out_imglist:
+            #         out.write(outimg)
+            #     out.release()
+            #     out_imglist = []
+            #
+            #     upload_video_to_s3(bucket_name, directory_path, video_file_path)
 
                 # try :
                 #     url = "http://localhost:8080/detect"
@@ -501,7 +504,8 @@ def predict(mode):
                 #         print('Failed to send notification', 400)
                 # except requests.exceptions.ConnectionError as errc:
                 #     print("Error Connecting:", errc)
-                framecnt = 0
+
+                #framecnt = 0
 
 
 ################################################
